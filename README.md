@@ -33,3 +33,16 @@ Foreman polls these statuses.
 Perhaps we give a skill that runs on a schedule to update a `todo.csv`
 
 Agents could be a Hermes gateway or a harness.
+
+top-level script:
+* global agent registry
+* work queues
+* leases/locks
+* priorities
+* customer isolation
+* assignment policy
+* “stuck” detection
+* escalation
+* audit trail
+* cross-machine coordination
+
