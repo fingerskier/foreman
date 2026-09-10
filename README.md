@@ -1,52 +1,123 @@
 # Foreman
-Plug-in to manage agents
 
-Every few minutes the fireman should answer:
-* What bots exist?
-* Which are currently running?
-* What is each bot working on?
-* When did each last make progress?
-* Which have no work?
-* Which are blocked/stuck?
-* Which queues contain unclaimed work?
-* Can I assign something without bothering User?
+Foreman is a small supervisor for a fleet of human/AI workers.
 
-Each agent should maintain a `status.json`:
+Its job is deliberately narrow:
+
+1. observe agent status,
+2. decide who needs attention or a nudge,
+3. send instructions through the messaging layer,
+4. surface the fleet clearly to the operator.
+
+Foreman is **not** the messaging bus, agent runtime, filesystem layer, or task database.
+
+## Architecture
+
+```text
+                    Foreman
+             policy + operator TUI
+                       │
+                       │ observe / instruct
+                       ▼
+                     Loose
+          identity + messages + status events
+                       │
+        ┌──────────────┼──────────────┐
+        ▼              ▼              ▼
+      Hermes         Hermes        other worker
+      local           VPS          / human
+```
+
+Loose owns agent identity, messaging, and status publication/subscription. Hermes and other runtimes execute work. Foreman reads that shared state and applies supervision policy.
+
+The initial interface is a terminal UI. A web/dashboard surface can come later if it proves useful.
+
+## Agent status
+
+Foreman expects Loose agents to expose a lightweight status object. The exact schema belongs in Loose, but conceptually:
+
 ```json
 {
-  "agent": "acme-coder",
-  "machine": "vps-3",
-  "scope": "customer/acme",
-  "status": "working",
-  "task": "GH-182",
-  "started_at": "...",
-  "last_progress_at": "...",
-  "blocked_on": null,
-  "next_action": "run integration tests"
+  "reported": {
+    "state": "working",
+    "task": "GH-182",
+    "summary": "Refactoring auth middleware",
+    "last_progress_at": "2026-09-10T01:11:00Z",
+    "blocked_on": null
+  },
+  "control": {
+    "priority": 4,
+    "do_not_interrupt": false
+  }
 }
 ```
 
-Foreman polls these statuses.
-- them updates are a script run instead of a slough of interrogations
-- each agent is responsible for keeping track of work for it's domain- so, the fireman isn't assigning work but triggering it
+Workers report reality. Authorized supervisors may set control fields. Foreman subscribes to status changes rather than repeatedly interrogating agents.
 
-Perhaps we give a skill that runs on a schedule to update a `todo.csv`
+See `fingerskier/Loose#17` for the Loose-side status proposal.
 
-Agents could be a Hermes gateway or a harness.
+## Foreman policy
 
-top-level script:
-* global agent registry
-* work queues
-* leases/locks
-* priorities
-* customer isolation
-* assignment policy
-* “stuck” detection
-* escalation
-* audit trail
-* cross-machine coordination
+The first useful policy can remain almost embarrassingly small:
 
-## Ancillary Stuff
-* Hermes desktop/dashboard UI layer
-* agent skills
+```text
+working + recent progress  -> leave alone
+working + stale progress   -> request an update
+blocked                    -> help, delegate, or escalate
+idle                       -> ask the worker to inspect its domain queue
+needs attention            -> surface to operator
+done                       -> allow the worker to choose its next domain task
+```
 
+Agents remain responsible for understanding the work in their domain. Foreman supervises and triggers; it does not need to become a universal scheduler.
+
+## TUI
+
+The first screen is a fleet board:
+
+```text
+FOREMAN                     15 agents
+
+WORKING  6   IDLE  7   BLOCKED  1   ATTENTION  1
+
+NAME             MACHINE      STATE       TASK              AGE
+architect        local        working     spectrum #441     18m
+lab-chief        lab          watching    test stand         7m
+acme             vps-3        blocked     GH-91             23m
+angel            vps-1        idle        -                  2m
+
+[j/k] select   [enter] inspect   [m] message   [r] refresh   [q] quit
+```
+
+The TUI should answer, at a glance:
+
+- who exists,
+- what each worker is doing,
+- whether progress is fresh,
+- who is blocked,
+- who needs the operator.
+
+## Near-term scope
+
+- [x] define the simplified architecture
+- [x] establish a TUI-first application shell
+- [ ] connect to Loose agent/status subscriptions
+- [ ] show live fleet state
+- [ ] inspect an agent and recent status history
+- [ ] send a message/instruction to an agent
+- [ ] add simple stale/blocked/attention policy
+- [ ] persist only Foreman-specific configuration
+
+## Explicitly deferred
+
+Do not add these until the simpler model proves insufficient:
+
+- Foreman-owned global work queues
+- leases/locks
+- a separate fleet database
+- filesystem synchronization
+- task state duplicated from GitHub/customer systems
+- Hermes-specific orchestration logic
+- autonomous work invention
+
+The design goal is a thin control surface over the collaboration fabric, not another agent platform.
