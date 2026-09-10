@@ -46,3 +46,7 @@ top-level script:
 * audit trail
 * cross-machine coordination
 
+## Ancillary Stuff
+* Hermes desktop/dashboard UI layer
+* agent skills
+
